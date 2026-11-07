@@ -207,11 +207,16 @@ function parseElectorate(html) {
 
 // ---------- state ----------
 
-// What the dashboard shows for a seat: the full detail snapshot if we have one that's at least as
-// new as the list row, otherwise the list row (leader and margin, no runner-up yet).
+// What the dashboard shows for a seat. The detail page is one consistent snapshot (leader, runner-up,
+// votes, margin), so show it while it's reasonably fresh, even if the list page has refreshed since.
+// Fall back to the list row (leader and margin only) when there's no detail yet, the detail is stale,
+// or a newer list row shows a different leader (a lead change shouldn't wait for the next detail fetch).
+const DETAIL_MAX_AGE = 5 * 60 * 1000;
+const leadMismatch = (e) => e.detail && e.list?.leader && e.detail.candidates[0]?.name !== e.list.leader.name;
 function view(e) {
   const l = e.list; const d = e.detail;
-  const useDetail = d && d.candidates.length >= 2 && (!l || d.fetchedAt >= l.fetchedAt);
+  const fresh = d && d.candidates.length >= 2 && Date.now() - Date.parse(d.fetchedAt) < DETAIL_MAX_AGE;
+  const useDetail = fresh && (!l || !leadMismatch(e) || d.fetchedAt >= l.fetchedAt);
   const base = { slug: e.slug, url: e.url, name: d?.name || l?.name || e.slug, history: e.history };
   if (useDetail) {
     const [leader, runnerUp] = d.candidates;
@@ -264,7 +269,7 @@ async function pollCloseSeats() {
       .map((e) => {
         const age = e.triedAt ? now - e.triedAt : 1e12; // never-tried first; failures wait their turn too
         const m = view(e).margin ?? WATCH_MARGIN;
-        return { e, score: age * (m < 1000 ? 2 : 1) };
+        return { e, score: leadMismatch(e) ? 1e13 : age * (m < 1000 ? 2 : 1) };
       })
       .sort((a, b) => b.score - a.score)
       .slice(0, BATCH);
