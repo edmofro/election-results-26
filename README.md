@@ -1,4 +1,4 @@
-# nz-election-live
+# election-results-26
 
 Election night dashboard for the 2026 NZ general election. Polls the Electoral Commission's
 preliminary results at `electionresults.govt.nz/ge2026/` and shows an RNZ-style seat horseshoe, the
