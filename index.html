@@ -85,7 +85,7 @@
   .marg-head input { width: 92px; font: 500 15px var(--sans); padding: 6px 8px; border: 1px solid var(--rule); border-radius: 3px; background: var(--bg); color: var(--ink); }
   .marg-note { margin: 0 0 18px; color: var(--muted); font-size: 14px; max-width: 70ch; }
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; }
-  .seat { border: 1px solid var(--rule); padding: 16px 18px 12px; display: flex; flex-direction: column; gap: 10px; }
+  .seat { border: 1px solid var(--rule); border-left: 6px solid var(--lead, var(--rule)); background: color-mix(in srgb, var(--lead, transparent) 8%, var(--bg)); padding: 16px 18px 12px; display: flex; flex-direction: column; gap: 10px; }
   .seat-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
   .seat-top .meta { font-size: 13px; color: var(--muted); margin-top: 3px; }
   .margin { text-align: right; }
@@ -353,7 +353,7 @@ function renderMarginals(s) {
     }
     const key = e.name || e.url;
     const rest = (e.candidates || []).slice(2);
-    return `<article class="seat">
+    return `<article class="seat" style="--lead:${L.color}">
       <div class="seat-top">
         <div>
           <h3>${esc(e.name || 'Unnamed electorate')}</h3>
