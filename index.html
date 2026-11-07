@@ -158,19 +158,21 @@
 
   <footer>
     Preliminary results exclude special votes and can change before the official count is declared.
-    Electorate seats shown are current leads, not confirmed wins. Seat projections are the Electoral Commission's.
+    Electorate seats shown are current leads, not confirmed wins. Results and seat projections come from RNZ,
+    which sources them from the Electoral Commission. RNZ's % counted is the share of voting places that have
+    reported, not the share of votes.
   </footer>
 </main>
 
 <script>
 const PARTIES = [
-  { re: /labour/i,                      short: 'Labour',        color: '#dc3b36', order: 10 },
-  { re: /green/i,                       short: 'Greens',        color: '#4a9d46', order: 20 },
-  { re: /m[aā]ori/i,                    short: 'Te Pāti Māori', color: '#8d1c17', order: 30 },
-  { re: /opportunit|\(TOP\)/i,          short: 'Opportunity',   color: '#3db3bd', order: 40 },
-  { re: /new zealand first|nz first/i,  short: 'NZ First',      color: '#8a8d93', order: 60 },
-  { re: /^act\b|act new zealand/i,      short: 'ACT',           color: '#df3d97', order: 70 },
-  { re: /national/i,                    short: 'National',      color: '#3d8de0', order: 80 },
+  { re: /labour/i,                      short: 'Labour',        color: '#EE2C3A', order: 10 },
+  { re: /green/i,                       short: 'Greens',        color: '#2BA53E', order: 20 },
+  { re: /m[aā]ori/i,                    short: 'Te Pāti Māori', color: '#A40808', order: 30 },
+  { re: /opportunit|\(TOP\)/i,          short: 'Opportunity',   color: '#00B9BC', order: 40 },
+  { re: /new zealand first|nz first/i,  short: 'NZ First',      color: '#908F8F', order: 60 },
+  { re: /^act\b|act new zealand/i,      short: 'ACT',           color: '#EE2796', order: 70 },
+  { re: /national/i,                    short: 'National',      color: '#1E99EA', order: 80 },
 ];
 function partyInfo(name) {
   if (!name) return { short: '', color: 'var(--unknown)', order: 50 };
@@ -274,17 +276,16 @@ function render(s) {
   const stage = o?.stage === 'official' ? 'Official count' : o ? 'Preliminary count' : 'Waiting for results';
   document.getElementById('stage').textContent = stage;
 
-  const bits = [`Source: <a href="${esc(s.source)}" target="_blank" rel="noopener">${esc(s.source.replace(/^https?:\/\//, ''))}</a>.`];
+  const bits = [`Source: <a href="${esc(s.source)}" target="_blank" rel="noopener">${esc(s.sourceName || s.source)}</a>.`];
   if (o) {
     bits.push(`Party vote checked ${time(o.fetchedAt)}.`);
     if (o.countedPct != null) bits.push(`${o.countedPct}% counted.`);
-    if (o.sourceUpdated) bits.push(`Source says updated ${esc(o.sourceUpdated)}.`);
   }
-  bits.push(`${s.electorates.length} of ${s.electoratesKnown || '?'} electorates loaded.`);
+  if (s.listFetchedAt) bits.push(`Electorates checked ${time(s.listFetchedAt)}.`);
   document.getElementById('status').innerHTML = bits.join(' ');
 
   let banner = '';
-  if (s.blocked) banner = `The Electoral Commission site refused the last request (HTTP ${s.blocked.status}) at ${time(s.blocked.at)}. Showing the last good data; the poller keeps retrying.`;
+  if (s.blocked) banner = `${esc(s.sourceName || 'The results site')} refused the last request (HTTP ${s.blocked.status}) at ${time(s.blocked.at)}. Showing the last good data; the poller keeps retrying.`;
   else if (!o && s.errors.length) banner = `Can't read the results page yet: ${esc(s.errors[0].message)}`;
   document.getElementById('banner').innerHTML = banner ? `<p class="banner">${banner}</p>` : '';
 
@@ -322,26 +323,23 @@ function candRow(c) {
 
 function renderMarginals(s) {
   const close = s.electorates
-    .filter(e => e.margin != null && e.leader && e.runnerUp && e.margin < threshold)
+    .filter(e => e.margin != null && e.leader && e.margin < threshold)
     .sort((a, b) => a.margin - b.margin);
 
   document.getElementById('marg-note').textContent = s.electorates.length
-    ? `${close.length} of ${s.electorates.length} loaded electorates have a lead under ${fmt(threshold)} votes. Close seats are re-checked about every 30 seconds, the rest every couple of minutes.`
+    ? `${close.length} of ${s.electorates.length} electorates have a lead under ${fmt(threshold)} votes. Margins for every seat refresh every 30 seconds; seats under ${fmt(s.watchMargin)} also get full candidate counts about once a minute.`
     : '';
 
   const box = document.getElementById('marginals');
   if (!s.electorates.length) {
-    const why = s.discovery?.status === 'not-found'
-      ? `No electorate pages found under ${esc(s.source)} yet. The poller retries every 2 minutes. If this persists, run the server with --dump and check the saved HTML.`
-      : 'Loading electorate results…';
-    box.innerHTML = `<div class="empty">${why}</div>`;
+    box.innerHTML = `<div class="empty">${s.errors.length ? `Can't read the electorates page yet: ${esc(s.errors[0].message)}` : 'Loading electorate results…'}</div>`;
     return;
   }
   if (!close.length) { box.innerHTML = `<div class="empty">No electorate has a lead under ${fmt(threshold)} votes right now.</div>`; return; }
 
   box.innerHTML = close.map(e => {
-    const L = partyInfo(e.leader.party), Rn = partyInfo(e.runnerUp.party);
-    const share = e.leader.votes / ((e.leader.votes + e.runnerUp.votes) || 1) * 100;
+    const L = partyInfo(e.leader.party), Rn = partyInfo(e.runnerUp?.party);
+    const share = e.runnerUp ? e.leader.votes / ((e.leader.votes + e.runnerUp.votes) || 1) * 100 : null;
     const h = e.history || [];
     // history holds one entry per change seen by this poller session
     const prev = h.length > 1 ? h[h.length - 2] : null;
@@ -363,8 +361,9 @@ function renderMarginals(s) {
         </div>
         <div class="margin"><b class="num">${fmt(e.margin)}</b><span>${esc(L.short || 'Leader')} lead</span></div>
       </div>
-      <div class="tug" aria-hidden="true"><i style="width:${share.toFixed(2)}%;background:${L.color}"></i><i style="flex:1;background:${Rn.color}"></i></div>
-      <div class="cand">${candRow(e.leader)}${candRow(e.runnerUp)}</div>
+      ${e.runnerUp ? `<div class="tug" aria-hidden="true"><i style="width:${share.toFixed(2)}%;background:${L.color}"></i><i style="flex:1;background:${Rn.color}"></i></div>` : ''}
+      <div class="cand">${candRow(e.leader)}${e.runnerUp ? candRow(e.runnerUp) : ''}</div>
+      ${e.runnerUp ? '' : '<div class="delta">Runner-up and vote counts load in the next minute or so.</div>'}
       ${flip || delta ? `<div class="delta">${[flip, delta].filter(Boolean).join(' ')}</div>` : ''}
       ${rest.length ? `<details data-key="${esc(key)}" ${openSeats.has(key) ? 'open' : ''}><summary>${rest.length} other candidate${rest.length === 1 ? '' : 's'}</summary><div class="cand">${rest.map(candRow).join('')}</div></details>` : ''}
     </article>`;

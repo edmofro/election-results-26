@@ -1,10 +1,11 @@
 # election-results-26
 
-Election night dashboard for the 2026 NZ general election. Polls the Electoral Commission's
-preliminary results at `electionresults.govt.nz/ge2026/` and shows an RNZ-style seat horseshoe, the
-party table, and every electorate with a lead under a threshold you set (default 1,000 votes).
+Election night dashboard for the 2026 NZ general election: an RNZ-style seat horseshoe, the party
+table, and every electorate with a lead under a threshold you set (default 1,000 votes).
 
-One server-side poller is shared by every viewer, so traffic to the EC doesn't grow with the audience.
+Data comes from RNZ's results pages, which carry Electoral Commission data. (The EC's own results
+site returns 403 to anything that isn't a browser.) One server-side poller is shared by every
+viewer, so traffic to RNZ doesn't grow with the audience.
 
 ## Run locally
 
@@ -17,50 +18,40 @@ open http://localhost:8026
 
 `?threshold=500` on the dashboard URL sets the marginal cut-off on load (or use the input).
 
+## What it polls
+
+- `/news/election-2026-results` every 30 s: party votes, seats, electorate/list split, % counted.
+- `/news/election-2026-results/electorates` every 30 s: leader, party and margin for all 71 seats.
+- `/news/election-2026-results/electorate/<slug>` only for seats with a lead under 2,000, 3 pages
+  every 10 s, tightest and stalest first. This is where runner-up and vote counts come from.
+
+That's roughly 0.3 requests a second. Sends `If-None-Match` / `If-Modified-Since`.
+
+Lead changes and margin movement are tracked from when the server starts (in memory only).
+
 ## Deploy on Railway
 
 Railway builds from the `Dockerfile` and redeploys on every push to the connected branch.
 
 1. New project, Deploy from GitHub repo, pick this repo.
-2. Settings, Networking, Generate Domain.
+2. Variables: `PORT` = `8026`. Networking: Generate Domain on port `8026`.
 3. Optional: Settings, Deploy, Healthcheck Path `/healthz`.
 
-No env vars are needed. Railway sets `PORT`. Everything else is optional:
+| Env var        | Default                                               | What it does                                      |
+| -------------- | ----------------------------------------------------- | ------------------------------------------------- |
+| `BASE_URL`     | `https://www.rnz.co.nz/news/election-2026-results`    | RNZ results root                                  |
+| `EVERY`        | `30`                                                  | Seconds between overview + electorates polls      |
+| `TICK`         | `10`                                                  | Seconds between close-seat batches                |
+| `BATCH`        | `3`                                                   | Close-seat pages per batch                        |
+| `WATCH_MARGIN` | `2000`                                                | Seats under this margin get full candidate detail |
+| `USER_AGENT`   | `election-results-26/1.0 (+repo URL; ...)`            | UA sent to RNZ                                    |
 
-| Env var         | Default                                        | What it does                                   |
-| --------------- | ---------------------------------------------- | ---------------------------------------------- |
-| `BASE_URL`      | `https://electionresults.govt.nz/ge2026/`      | Results page to poll                           |
-| `OVERALL_EVERY` | `30`                                           | Seconds between party-vote polls               |
-| `TICK`          | `10`                                           | Seconds between electorate batches             |
-| `BATCH`         | `4`                                            | Electorate pages fetched per batch             |
-| `WATCH_MARGIN`  | `2000`                                         | Seats under this margin are polled ~4x as often |
-| `USER_AGENT`    | `nz-election-live/1.0 (...)`                   | UA sent to the EC                              |
+## Caveats
 
-State is in memory. A redeploy or restart reloads everything from the EC within a couple of minutes
-but loses the lead-change and margin-movement history.
-
-## What it polls, and how often
-
-- Party vote page every 30 s.
-- Electorate pages 4 every 10 s. Seats with a lead under 2,000 get checked about 4x as often as safe
-  ones, so close seats refresh roughly every 30 s and the rest every few minutes.
-- Sends `If-None-Match` / `If-Modified-Since`, so unchanged pages cost a 304.
-
-## Known unknowns
-
-The EC and RNZ results pages both refused automated fetches when this was built, so the parser was
-written against the 2023 EC page layout plus the 2026 party table as it appears in search snippets.
-Not verified against the live 2026 electorate pages:
-
-- The electorate page URLs. It looks for links on the results page, then on any "electorate" index
-  page it links to, then probes `electorate-details-1.html`, `-2`, ... (the 2023 scheme).
-- The electorate page markup. It reads the `VOTES COUNTED` / `LEADING CANDIDATE` / `MAJORITY` block
-  by label and assumes each candidate row carries that candidate's party in the next cell, as in 2023.
-
-Railway runs on datacentre IPs, which bot protection is more likely to block than a home connection.
-If the dashboard shows a "refused the last request" banner on Railway, run it locally instead.
-
-If it can't find electorates or names look wrong, run locally with `node server.mjs --dump` (saves
-every fetched page to `./dump`) and adjust `parseElectorate` / `discover` in `server.mjs`.
-
-Dry run against the 2023 official results (same EC page family): `npm run dry-run-2023`.
+- The parser is written against RNZ's markup as saved on election night (Next.js, server-rendered
+  tables). If RNZ changes it, run `node server.mjs --dump` and adjust the three `parse*` functions.
+- RNZ's "% counted" is the share of voting places that have reported, not the share of votes.
+- RNZ's terms of use and robots.txt weren't checked when this was written. Check them before
+  running it anywhere public.
+- Railway runs on datacentre IPs. If RNZ blocks those, the dashboard shows a "refused the last
+  request" banner; run it locally instead.

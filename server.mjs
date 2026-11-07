@@ -1,19 +1,24 @@
 #!/usr/bin/env node
-// Election night tracker. Polls the Electoral Commission's preliminary results
-// (electionresults.govt.nz) and serves a dashboard. One poller is shared by every viewer.
+// Election night tracker. Polls RNZ's 2026 results pages (Electoral Commission data) and serves a
+// dashboard. One poller is shared by every viewer.
+//
+// Each cycle:
+//   - the results overview page every 30 s (party votes, seats, electorate/list split, % counted)
+//   - the all-electorates page every 30 s (leader, party, margin, % counted for all 71 seats)
+//   - individual electorate pages only for close seats, a few every 10 s (runner-up and full
+//     candidate votes)
 //
 // Node 18+ and no dependencies.
 //   node server.mjs
-//   node server.mjs --base https://archive.electionresults.govt.nz/electionresults_2023/   (dry run on 2023)
-//   node server.mjs --dump               (save every fetched page to ./dump for debugging the parser)
+//   node server.mjs --dump        (save every fetched page to ./dump for debugging the parser)
 //
 // Every flag can also be set as an env var (handy on Railway):
-//   --base           BASE_URL        default https://electionresults.govt.nz/ge2026/
+//   --base           BASE_URL        default https://www.rnz.co.nz/news/election-2026-results
 //   --port           PORT            default 8026
-//   --overall-every  OVERALL_EVERY   seconds between party-vote polls, default 30
-//   --tick           TICK            seconds between electorate batches, default 10
-//   --batch          BATCH           electorate pages per batch, default 4
-//   --watch-margin   WATCH_MARGIN    seats under this margin are polled ~4x as often, default 2000
+//   --every          EVERY           seconds between overview + electorates polls, default 30
+//   --tick           TICK            seconds between close-seat batches, default 10
+//   --batch          BATCH           close-seat pages per batch, default 3
+//   --watch-margin   WATCH_MARGIN    seats under this margin get full candidate detail, default 2000
 //   --ua             USER_AGENT
 
 import http from 'node:http';
@@ -23,13 +28,14 @@ import path from 'node:path';
 
 const args = parseArgs(process.argv.slice(2));
 const opt = (flag, env, fallback) => args[flag] ?? process.env[env] ?? fallback;
-const BASE = withSlash(opt('base', 'BASE_URL', 'https://electionresults.govt.nz/ge2026/'));
+const BASE = String(opt('base', 'BASE_URL', 'https://www.rnz.co.nz/news/election-2026-results')).replace(/\/+$/, '');
+const LIST_URL = `${BASE}/electorates`;
 const PORT = Number(opt('port', 'PORT', 8026));
-const OVERALL_EVERY = Number(opt('overall-every', 'OVERALL_EVERY', 30)) * 1000;
+const EVERY = Number(opt('every', 'EVERY', 30)) * 1000;
 const TICK = Number(opt('tick', 'TICK', 10)) * 1000;
-const BATCH = Number(opt('batch', 'BATCH', 4));
+const BATCH = Number(opt('batch', 'BATCH', 3));
 const WATCH_MARGIN = Number(opt('watch-margin', 'WATCH_MARGIN', 2000));
-const UA = opt('ua', 'USER_AGENT', 'nz-election-live/1.0 (results dashboard; one shared poller, polls politely)');
+const UA = opt('ua', 'USER_AGENT', 'election-results-26/1.0 (+https://github.com/edmofro/election-results-26; one shared poller)');
 const DUMP = args.dump ? path.resolve(args.dump === true ? 'dump' : args.dump) : null;
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -37,8 +43,8 @@ const state = {
   source: BASE,
   startedAt: new Date().toISOString(),
   overall: null,
-  electorates: new Map(), // url -> electorate record
-  discovery: { status: 'pending', how: null, at: null },
+  electorates: new Map(), // slug -> { slug, url, list, detail, history }
+  listFetchedAt: null,
   blocked: null,
   errors: [],
 };
@@ -88,225 +94,189 @@ function logError(url, err) {
 
 // ---------- HTML helpers (regex-based, no deps) ----------
 
-const ENTITIES = {
-  amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', rsquo: '’', lsquo: '‘',
-  ldquo: '“', rdquo: '”', ndash: '–', mdash: '—', hellip: '…',
-  amacr: 'ā', Amacr: 'Ā', emacr: 'ē', Emacr: 'Ē', imacr: 'ī', Imacr: 'Ī',
-  omacr: 'ō', Omacr: 'Ō', umacr: 'ū', Umacr: 'Ū',
-};
+const ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', rsquo: '’', lsquo: '‘', ldquo: '“', rdquo: '”', ndash: '–', mdash: '—' };
 const decode = (s) => s.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (m, e) => {
   if (e[0] === '#') return String.fromCodePoint(e[1].toLowerCase() === 'x' ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10));
   return ENTITIES[e] ?? m;
 });
-const toText = (html) => decode(
-  html.replace(/<(script|style)\b[\s\S]*?<\/\1>/gi, ' ').replace(/<br\s*\/?>/gi, ' ').replace(/<[^>]+>/g, ' ')
-).replace(/\s+/g, ' ').trim();
-
-function tables(html) {
-  return [...html.matchAll(/<table\b[\s\S]*?<\/table>/gi)].map((t) =>
-    [...t[0].matchAll(/<tr\b[\s\S]*?<\/tr>/gi)].map((r) =>
-      [...r[0].matchAll(/<t([hd])\b[^>]*>([\s\S]*?)<\/t\1>/gi)].map((c) => toText(c[2]))));
-}
-
-function links(html, base) {
-  const out = new Set();
-  for (const m of html.matchAll(/href\s*=\s*["']([^"'#]+)["']/gi)) {
-    try { out.add(new URL(decode(m[1]), base).href); } catch { /* ignore bad hrefs */ }
-  }
-  return [...out];
-}
-
+const stripScripts = (html) => html.replace(/<(script|style)\b[\s\S]*?<\/\1>/gi, ' ');
+const toText = (html) => decode(stripScripts(html).replace(/<!--[\s\S]*?-->/g, '').replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim();
+const rowsOf = (tableHtml) => [...tableHtml.matchAll(/<tr\b[\s\S]*?<\/tr>/gi)].map((r) => r[0]);
+const cellsOf = (rowHtml) => [...rowHtml.matchAll(/<t([hd])\b[^>]*>([\s\S]*?)<\/t\1>/gi)].map((c) => c[2]);
+const tables = (html) => [...stripScripts(html).matchAll(/<table\b[\s\S]*?<\/table>/gi)].map((t) => t[0]);
 const num = (s) => {
   if (s == null) return null;
   const m = String(s).replace(/,/g, '').match(/-?\d+(?:\.\d+)?/);
   return m ? Number(m[0]) : null;
 };
+const STATUS_WORD = /\s+(lead|leads|wins?|won|holds?|retains?|gains?)$/i;
 
-// ---------- parsers ----------
+// ---------- parsers (RNZ election-2026-results markup) ----------
 
-// Nationwide party table. Matches the 2023 and 2026 EC layouts:
-// [party name, party votes, % of votes, electorate seats, list seats, total seats], "-" meaning zero.
-function parseOverall(html) {
-  const text = toText(html);
-  let parties = [];
+// Overview: "Results by party" table [Party, Votes, Pct., Seats] plus the screen-reader seat
+// breakdown "<p><span>Labour</span>: 20 electorate seats, 16 list seats, 36 total seats</p>".
+function parseOverview(html) {
+  const parties = [];
   let totals = null;
-
-  for (const rows of tables(html)) {
-    if (!rows.some((r) => r.some((c) => /party votes/i.test(c)))) continue;
-    for (const r of rows) {
-      if (r.length < 5 || /party votes/i.test(r.join(' '))) continue;
-      const [name, ...rest] = r;
-      const vals = rest.map((c) => (c.trim() === '-' || c.trim() === '' ? 0 : num(c)));
-      if (/^total/i.test(name)) {
-        totals = { votes: vals[0], electorate: vals.at(-3), list: vals.at(-2), seats: vals.at(-1) };
-        continue;
-      }
-      if (!name || rest[0].trim() === '-' || vals[0] == null) continue; // component parties listed with no votes
-      const [votes, pct, electorate, list, seats] = vals;
-      parties.push({ name, votes, pct, electorate: electorate || 0, list: list || 0, seats: seats || 0 });
+  for (const t of tables(html)) {
+    const rows = rowsOf(t);
+    const head = toText(rows[0] || '');
+    if (!/party/i.test(head) || !/votes/i.test(head) || !/seats/i.test(head)) continue;
+    for (const r of rows.slice(1)) {
+      const [name, votes, pct, seats] = cellsOf(r).map(toText);
+      if (!name) continue;
+      if (/^total$/i.test(name)) { totals = { votes: num(votes), seats: num(seats) }; continue; }
+      parties.push({ name, votes: num(votes), pct: num(pct), seats: num(seats) || 0, electorate: 0, list: num(seats) || 0 });
     }
     if (parties.length) break;
   }
 
-  const counted = text.match(/(\d+(?:\.\d+)?)\s*%\s*(?:of\s+)?(?:the\s+)?(?:votes?|voting places)\s+counted/i)
-    || text.match(/counted[^%]{0,60}?(\d+(?:\.\d+)?)\s*%/i);
-  const updated = text.match(/(?:last\s+)?updated:?\s*((?:\d{1,2}[:.]\d{2}\s*(?:am|pm)?[^.|]{0,30})|(?:\d{1,2}\s+\w+\s+\d{4}[^.|]{0,20}))/i);
-  const stage = /official result/i.test(text) ? 'official' : /preliminary/i.test(text) ? 'preliminary' : null;
+  const split = new Map();
+  const re = /<p>\s*<span[^>]*>([^<]+)<\/span>\s*:\s*(\d+)\s+electorate seats?,\s*(\d+)\s+list seats?,\s*(\d+)\s+total seats?\s*<\/p>/gi;
+  for (const m of html.matchAll(re)) split.set(decode(m[1]).trim(), { electorate: +m[2], list: +m[3], seats: +m[4] });
+  for (const p of parties) {
+    const s = split.get(p.name);
+    if (s) Object.assign(p, { electorate: s.electorate, list: s.list, seats: s.seats });
+  }
 
+  const text = toText(html);
+  const counted = text.match(/([\d.]+)\s*%\s*counted/i);
   return {
     parties,
     totals,
     countedPct: counted ? Number(counted[1]) : null,
-    sourceUpdated: updated ? updated[1].trim() : null,
-    stage,
+    // RNZ's disclaimer mentions "official" results too, so only call it official once "preliminary" is gone
+    stage: !/preliminary/i.test(text) && /official/i.test(text) ? 'official' : 'preliminary',
     fetchedAt: new Date().toISOString(),
   };
 }
 
-// One electorate page. Pulls the summary block by its labels (VOTES COUNTED, LEADING CANDIDATE,
-// 2nd CANDIDATE, MAJORITY) and the candidate table, where each candidate row carries that
-// candidate's party in the second cell (blank = independent), as on the 2023 EC pages.
-function parseElectorate(html, url) {
+// All-electorates page: one row per seat linking to /electorate/<slug>, with "% counted",
+// "<Party> lead" / "<Leader name>", and the margin. The page also has a "Key electorates" table
+// repeating some seats, so rows are keyed by slug.
+function parseElectorateList(html, baseUrl) {
+  const out = new Map();
+  for (const t of tables(html)) {
+    for (const r of rowsOf(t)) {
+      const link = r.match(/href="([^"]*\/electorate\/([^"/?#]+))"[^>]*>([\s\S]*?)<\/a>/i);
+      if (!link) continue;
+      const cells = cellsOf(r);
+      const slug = link[2];
+      const counted = toText(cells[0] || '').match(/([\d.]+)\s*%\s*counted/i);
+      const status = (cells[1] || '').match(/<div[^>]*class="[^"]*\btext-sm\b[^"]*"[^>]*>([\s\S]*?)<\/div>\s*<div[^>]*class="[^"]*\btext-xs\b[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
+      const party = status ? toText(status[1]).replace(STATUS_WORD, '').trim() : null;
+      const leaderName = status ? toText(status[2]) : null;
+      out.set(slug, {
+        slug,
+        url: new URL(decode(link[1]), baseUrl).href,
+        name: toText(link[3]),
+        countedPct: counted ? Number(counted[1]) : null,
+        leader: leaderName ? { name: leaderName, party } : null,
+        margin: num(toText(cells[2] || '')),
+        fetchedAt: new Date().toISOString(),
+      });
+    }
+  }
+  return out;
+}
+
+// Electorate page: <h1>Name</h1>, "% counted", and a Candidates table [Candidate, Party, Pct., Votes].
+function parseElectorate(html) {
+  const h1 = html.match(/<h1\b[^>]*>([\s\S]*?)<\/h1>/i);
   const text = toText(html);
-
-  const heading = [...html.matchAll(/<(h[1-3]|title)\b[^>]*>([\s\S]*?)<\/\1>/gi)]
-    .map((m) => toText(m[2]).match(/^(.+?)\s+[-–]\s+(?:preliminary|official|progress)/i))
-    .find((m) => m && !/general election/i.test(m[1]));
-  const name = heading ? heading[1].replace(/^.*?\|\s*/, '').trim() : null;
-
-  const counted = text.match(/votes counted:?\s*([\d,]+)\s+([\d.]+)\s*%/i);
-  const lead = text.match(/leading candidate:?\s*([^\d|]+?)\s+([\d,]+)/i);
-  const second = text.match(/2nd candidate:?\s*([^\d|]+?)\s+([\d,]+)/i);
-  const majority = text.match(/(?:majority|margin):?\s*([\d,]+)/i);
-
+  const counted = text.match(/([\d.]+)\s*%\s*counted/i);
   let candidates = [];
-  for (const rows of tables(html)) {
-    if (!rows.some((r) => r.some((c) => /^candidates?\b/i.test(c)))) continue;
-    for (const r of rows) {
-      const cm = (r[0] || '').match(/^([^\d]*[A-Za-zÀ-ž][^\d]*?)\s+([\d,]+)$/);
-      if (!cm || /informal|total/i.test(cm[1])) continue;
-      const pm = (r[1] || '').match(/^(.+?)\s+([\d,]+)$/);
-      candidates.push({ name: cm[1].trim(), votes: num(cm[2]), party: pm ? pm[1].trim() : 'Independent' });
+  for (const t of tables(html)) {
+    const rows = rowsOf(t);
+    if (!/candidate/i.test(toText(rows[0] || ''))) continue;
+    for (const r of rows.slice(1)) {
+      const cells = cellsOf(r).map(toText);
+      if (!cells[0] || /^total$/i.test(cells[0])) continue;
+      candidates.push({ name: cells[0], party: cells[1] || 'Independent', votes: num(cells.at(-1)) });
     }
     if (candidates.length) break;
   }
-  candidates.sort((a, b) => b.votes - a.votes);
-
-  let leader; let runnerUp; let margin;
-  if (candidates.length >= 2) {
-    [leader, runnerUp] = candidates;
-    margin = leader.votes - runnerUp.votes;
-  } else if (lead && second) {
-    leader = { name: lead[1].trim(), votes: num(lead[2]), party: null };
-    runnerUp = { name: second[1].trim(), votes: num(second[2]), party: null };
-    margin = majority ? num(majority[1]) : leader.votes - runnerUp.votes;
-  }
-
+  candidates = candidates.filter((c) => c.votes != null).sort((a, b) => b.votes - a.votes);
   return {
-    url,
-    name,
-    countedVotes: counted ? num(counted[1]) : null,
-    countedPct: counted ? Number(counted[2]) : null,
-    leader: leader || null,
-    runnerUp: runnerUp || null,
-    margin: margin ?? null,
+    name: h1 ? toText(h1[1]) : null,
+    countedPct: counted ? Number(counted[1]) : null,
     candidates,
     fetchedAt: new Date().toISOString(),
   };
 }
 
-// ---------- discovery of electorate pages ----------
+// ---------- state ----------
 
-const DETAIL_RE = /electorate[-_]?details?[-_]?\d+/i;
-
-async function discover(baseHtml) {
-  const fromBase = links(baseHtml, BASE);
-  let urls = fromBase.filter((u) => DETAIL_RE.test(u));
-  if (urls.length) return { how: 'linked from the results page', urls };
-
-  // follow "results by electorate"-style index pages
-  for (const idx of fromBase.filter((u) => /electorate/i.test(u) && u.startsWith(BASE)).slice(0, 5)) {
-    try {
-      urls = links(await fetchPage(idx), idx).filter((u) => DETAIL_RE.test(u));
-      if (urls.length) return { how: `linked from ${idx}`, urls };
-    } catch (e) { logError(idx, e); }
+// What the dashboard shows for a seat: the full detail snapshot if we have one that's at least as
+// new as the list row, otherwise the list row (leader and margin, no runner-up yet).
+function view(e) {
+  const l = e.list; const d = e.detail;
+  const useDetail = d && d.candidates.length >= 2 && (!l || d.fetchedAt >= l.fetchedAt);
+  const base = { slug: e.slug, url: e.url, name: d?.name || l?.name || e.slug, history: e.history };
+  if (useDetail) {
+    const [leader, runnerUp] = d.candidates;
+    return { ...base, countedPct: d.countedPct ?? l?.countedPct, leader, runnerUp, margin: leader.votes - runnerUp.votes, candidates: d.candidates, fetchedAt: d.fetchedAt, detailed: true };
   }
-
-  // probe the 2023 naming scheme: electorate-details-1.html, -2, ...
-  urls = [];
-  let misses = 0;
-  for (let i = 1; i < 100 && misses < 5; i++) {
-    const u = new URL(`electorate-details-${i}.html`, BASE).href;
-    try {
-      ingestElectorate(u, await fetchPage(u));
-      urls.push(u);
-      misses = 0;
-    } catch (e) {
-      if (e.status === 404) misses++;
-      else { logError(u, e); if (e.status === 403 || e.status === 429) break; }
-    }
-  }
-  if (urls.length) return { how: 'probed electorate-details-N.html', urls };
-  return null;
+  return { ...base, countedPct: l?.countedPct ?? null, leader: l?.leader || null, runnerUp: null, margin: l?.margin ?? null, candidates: [], fetchedAt: l?.fetchedAt, detailed: false };
 }
 
-// ---------- state updates ----------
-
-function ingestElectorate(url, html) {
-  const next = parseElectorate(html, url);
-  const prev = state.electorates.get(url);
-  const history = prev?.history || [];
-  const last = history.at(-1);
-  if (next.margin != null && (!last || last.margin !== next.margin || last.leader !== next.leader?.name)) {
-    history.push({ at: next.fetchedAt, margin: next.margin, leader: next.leader?.name, countedPct: next.countedPct });
-    if (history.length > 40) history.shift();
+function record(e) {
+  const v = view(e);
+  if (v.margin == null || !v.leader) return;
+  const last = e.history.at(-1);
+  if (!last || last.margin !== v.margin || last.leader !== v.leader.name) {
+    e.history.push({ at: v.fetchedAt, margin: v.margin, leader: v.leader.name, countedPct: v.countedPct });
+    if (e.history.length > 40) e.history.shift();
   }
-  state.electorates.set(url, { ...next, history });
 }
 
-async function pollOverall() {
+async function pollPages() {
   try {
-    const html = await fetchPage(BASE);
-    const overall = parseOverall(html);
-    if (!overall.parties.length) throw new Error('No party table found on the results page (layout may have changed; run with --dump)');
-    state.overall = overall;
+    try {
+      const overall = parseOverview(await fetchPage(BASE));
+      if (!overall.parties.length) throw new Error('No party table found on the RNZ results page (layout may have changed; run with --dump)');
+      state.overall = overall;
+    } catch (e) { logError(BASE, e); }
 
-    if (state.discovery.status !== 'ok' && (!state.discovery.at || Date.now() - Date.parse(state.discovery.at) > 120000)) {
-      state.discovery = { status: 'searching', how: null, at: new Date().toISOString() };
-      const found = await discover(html);
-      if (found) {
-        for (const u of found.urls) if (!state.electorates.has(u)) state.electorates.set(u, { url: u, history: [] });
-        state.discovery = { status: 'ok', how: found.how, count: found.urls.length, at: new Date().toISOString() };
-        console.log(`Found ${found.urls.length} electorate pages (${found.how})`);
-      } else {
-        state.discovery = { status: 'not-found', how: null, at: new Date().toISOString() };
-        console.warn('No electorate pages found yet. Will retry in 2 minutes.');
+    try {
+      const rows = parseElectorateList(await fetchPage(LIST_URL), LIST_URL);
+      if (!rows.size) throw new Error('No electorates found on the RNZ electorates page (layout may have changed; run with --dump)');
+      for (const [slug, row] of rows) {
+        const e = state.electorates.get(slug) || { slug, url: row.url, list: null, detail: null, history: [] };
+        e.list = row;
+        e.url = row.url;
+        state.electorates.set(slug, e);
+        record(e);
       }
-    }
-  } catch (e) {
-    logError(BASE, e);
+      state.listFetchedAt = new Date().toISOString();
+    } catch (e) { logError(LIST_URL, e); }
   } finally {
-    setTimeout(pollOverall, OVERALL_EVERY);
+    setTimeout(pollPages, EVERY);
   }
 }
 
-// Close seats get refreshed roughly 4x as often as safe ones.
-async function pollElectorates() {
+// Close seats only. Tighter seats and staler snapshots go first.
+async function pollCloseSeats() {
   try {
     const now = Date.now();
     const due = [...state.electorates.values()]
+      .filter((e) => (e.list?.margin ?? Infinity) < WATCH_MARGIN || (e.detail && view(e).margin < WATCH_MARGIN))
       .map((e) => {
-        const age = e.fetchedAt ? now - Date.parse(e.fetchedAt) : Infinity;
-        const close = e.margin == null || e.margin <= WATCH_MARGIN;
-        return { e, score: close ? age : age / 4 };
+        const age = e.triedAt ? now - e.triedAt : 1e12; // never-tried first; failures wait their turn too
+        const m = view(e).margin ?? WATCH_MARGIN;
+        return { e, score: age * (m < 1000 ? 2 : 1) };
       })
       .sort((a, b) => b.score - a.score)
       .slice(0, BATCH);
     await Promise.all(due.map(async ({ e }) => {
-      try { ingestElectorate(e.url, await fetchPage(e.url)); } catch (err) { logError(e.url, err); }
+      e.triedAt = Date.now();
+      try {
+        const d = parseElectorate(await fetchPage(e.url));
+        if (d.candidates.length) { e.detail = d; record(e); }
+      } catch (err) { logError(e.url, err); }
     }));
   } finally {
-    setTimeout(pollElectorates, TICK);
+    setTimeout(pollCloseSeats, TICK);
   }
 }
 
@@ -315,12 +285,13 @@ async function pollElectorates() {
 function snapshot() {
   return {
     source: state.source,
+    sourceName: 'RNZ',
     startedAt: state.startedAt,
     now: new Date().toISOString(),
     overall: state.overall,
-    electorates: [...state.electorates.values()].filter((e) => e.fetchedAt),
-    electoratesKnown: state.electorates.size,
-    discovery: state.discovery,
+    listFetchedAt: state.listFetchedAt,
+    electorates: [...state.electorates.values()].map(view),
+    watchMargin: WATCH_MARGIN,
     blocked: state.blocked,
     errors: state.errors.slice(0, 8),
   };
@@ -335,7 +306,7 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
     return res.end(JSON.stringify(snapshot()));
   }
-  if (req.url === '/' || req.url.startsWith('/index.html')) {
+  if (req.url === '/' || req.url.startsWith('/index.html') || req.url.startsWith('/?')) {
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
     return res.end(await readFile(path.join(HERE, 'index.html')));
   }
@@ -345,8 +316,8 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, () => {
   console.log(`Polling ${BASE}`);
   console.log(`Dashboard on port ${PORT}`);
-  pollOverall();
-  setTimeout(pollElectorates, 3000);
+  pollPages();
+  setTimeout(pollCloseSeats, 4000);
 });
 
 // Node as PID 1 in a container ignores SIGTERM unless handled, which stalls redeploys.
@@ -369,4 +340,3 @@ function parseArgs(argv) {
   }
   return out;
 }
-function withSlash(u) { return /\.html?$/.test(u) || u.endsWith('/') ? u : u + '/'; }
