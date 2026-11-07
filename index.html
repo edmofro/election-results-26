@@ -1,0 +1,390 @@
+<!doctype html>
+<html lang="en-NZ">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Election night 2026</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,600;8..60,700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #ffffff;
+    --ink: #1b1d22;
+    --muted: #686c76;
+    --rule: #d9dbe0;
+    --wash: #f4f5f7;
+    --badge-bg: #fcf0c3;
+    --badge-ink: #3d3200;
+    --warn-bg: #fff4e5;
+    --warn-ink: #6b3d00;
+    --unknown: #b6b9c1;
+    --serif: "Source Serif 4", Georgia, "Times New Roman", serif;
+    --sans: "Public Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --bg: #15171b;
+      --ink: #eceef1;
+      --muted: #9ba0aa;
+      --rule: #32363d;
+      --wash: #1d2025;
+      --badge-bg: #4d4112;
+      --badge-ink: #f7e8a8;
+      --warn-bg: #3a2a12;
+      --warn-ink: #f4d3a1;
+      --unknown: #5d616a;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 400 16px/1.45 var(--sans); }
+  main { max-width: 1180px; margin: 0 auto; padding: 28px 20px 64px; }
+  h1, h2, h3 { font-family: var(--serif); font-weight: 700; margin: 0; letter-spacing: -0.01em; }
+  h1 { font-size: clamp(30px, 4.4vw, 44px); line-height: 1.05; }
+  h2 { font-size: 28px; line-height: 1.15; }
+  h3 { font-size: 20px; line-height: 1.2; }
+  .num { font-variant-numeric: tabular-nums; }
+  .muted { color: var(--muted); }
+  a { color: inherit; }
+
+  header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px 16px; margin-bottom: 6px; }
+  .badge { display: inline-block; background: var(--badge-bg); color: var(--badge-ink); font: 500 15px/1 var(--sans); padding: 7px 9px; border-radius: 2px; vertical-align: middle; }
+  .status { color: var(--muted); font-size: 14px; margin: 0 0 22px; }
+  .banner { background: var(--warn-bg); color: var(--warn-ink); padding: 10px 14px; border-radius: 4px; font-size: 14px; margin: 0 0 18px; }
+
+  .bop-head { display: flex; align-items: center; gap: 12px; margin: 0 0 14px; }
+  .bop { display: grid; grid-template-columns: minmax(300px, 0.95fr) 1.05fr; border: 1px solid var(--rule); }
+  .bop > * { min-width: 0; }
+  .chart { position: relative; padding: 18px 16px 18px; border-right: 1px solid var(--rule); display: flex; justify-content: center; }
+  .chart svg { width: 100%; max-width: 440px; height: auto; display: block; }
+  .corner { position: absolute; top: 14px; font-size: 14px; line-height: 1.5; }
+  .corner.left { left: 16px; }
+  .corner.right { right: 16px; text-align: right; }
+  .key-dot { display: inline-block; width: 11px; height: 11px; border-radius: 50%; background: var(--muted); margin-right: 6px; vertical-align: -1px; }
+  .key-dot.ring { background: none; border: 3px solid var(--muted); }
+  .seat-label { font: 500 13px var(--sans); fill: var(--ink); }
+  .seat-sub { font: 400 13px var(--sans); fill: var(--muted); }
+
+  .results { padding: 22px 0 0; display: flex; flex-direction: column; }
+  .results h3 { padding: 0 24px 16px; }
+  table { border-collapse: collapse; width: 100%; }
+  th { font: 400 14px var(--sans); color: var(--muted); text-align: right; padding: 8px 24px 10px 12px; border-bottom: 1px solid var(--rule); }
+  th:first-child { text-align: left; padding-left: 24px; }
+  td { padding: 12px 24px 12px 12px; border-bottom: 1px solid var(--rule); text-align: right; font-size: 17px; }
+  td:first-child { text-align: left; font-weight: 600; padding-left: 20px; border-left: 6px solid var(--c, var(--unknown)); }
+  td:last-child { font-weight: 700; }
+  tr.total td { color: var(--muted); font-weight: 400; border-left-color: transparent; }
+  .toggle { margin-top: auto; border: 0; background: none; color: var(--ink); font: 500 15px var(--sans); padding: 14px; cursor: pointer; }
+  .toggle:hover { background: var(--wash); }
+  button:focus-visible, input:focus-visible, summary:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+
+  .marg-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 10px 24px; margin: 44px 0 6px; }
+  .marg-head label { font-size: 15px; display: flex; align-items: center; gap: 8px; }
+  .marg-head input { width: 92px; font: 500 15px var(--sans); padding: 6px 8px; border: 1px solid var(--rule); border-radius: 3px; background: var(--bg); color: var(--ink); }
+  .marg-note { margin: 0 0 18px; color: var(--muted); font-size: 14px; max-width: 70ch; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; }
+  .seat { border: 1px solid var(--rule); padding: 16px 18px 12px; display: flex; flex-direction: column; gap: 10px; }
+  .seat-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+  .seat-top .meta { font-size: 13px; color: var(--muted); margin-top: 3px; }
+  .margin { text-align: right; }
+  .margin b { display: block; font: 700 30px/1 var(--serif); }
+  .margin span { font-size: 13px; color: var(--muted); white-space: nowrap; }
+  .flip { display: inline-block; font-size: 12px; font-weight: 600; background: var(--badge-bg); color: var(--badge-ink); padding: 2px 6px; border-radius: 2px; }
+  .tug { position: relative; display: flex; height: 10px; background: var(--wash); }
+  .tug i { display: block; height: 100%; }
+  .tug::after { content: ""; position: absolute; left: 50%; top: -3px; bottom: -3px; width: 2px; background: var(--ink); opacity: 0.7; }
+  .cand { display: grid; grid-template-columns: 12px 1fr auto; gap: 4px 10px; align-items: baseline; font-size: 15px; }
+  .cand .dot { width: 10px; height: 10px; border-radius: 50%; align-self: center; }
+  .cand .who small { color: var(--muted); margin-left: 6px; }
+  .delta { font-size: 13px; color: var(--muted); }
+  details { font-size: 14px; border-top: 1px solid var(--rule); padding-top: 8px; }
+  summary { cursor: pointer; color: var(--muted); }
+  details .cand { margin-top: 8px; font-size: 14px; }
+  .empty { border: 1px dashed var(--rule); padding: 22px; color: var(--muted); }
+  footer { margin-top: 40px; font-size: 13px; color: var(--muted); max-width: 80ch; }
+
+  @media (max-width: 820px) {
+    .bop { grid-template-columns: minmax(0, 1fr); }
+    .chart { border-right: 0; border-bottom: 1px solid var(--rule); padding-top: 64px; }
+    td, th { padding: 10px 10px 10px 8px; font-size: 15px; }
+    th:first-child { padding-left: 14px; }
+    td:first-child { padding-left: 10px; }
+    .grid { grid-template-columns: minmax(0, 1fr); }
+  }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Election night 2026</h1>
+    <span class="badge" id="stage">Waiting for results</span>
+  </header>
+  <p class="status" id="status">Connecting…</p>
+  <div id="banner"></div>
+
+  <section aria-labelledby="bop-title">
+    <div class="bop-head"><h2 id="bop-title">Balance of power</h2><span class="badge">Projected</span></div>
+    <div class="bop">
+      <div class="chart">
+        <div class="corner left">
+          Key<br>
+          <span class="key-dot"></span>Electorate seats<br>
+          <span class="key-dot ring"></span>List seats
+        </div>
+        <div class="corner right" id="seat-count"></div>
+        <div id="horseshoe" style="width:100%;display:flex;justify-content:center"></div>
+      </div>
+      <div class="results">
+        <h3>Results by party</h3>
+        <table>
+          <thead><tr><th>Party</th><th>Votes</th><th>Pct.</th><th>Seats</th></tr></thead>
+          <tbody id="party-rows"></tbody>
+        </table>
+        <button class="toggle" id="toggle-parties" aria-expanded="false">Show all parties</button>
+      </div>
+    </div>
+  </section>
+
+  <section aria-labelledby="marg-title">
+    <div class="marg-head">
+      <h2 id="marg-title">Marginal seats</h2>
+      <label>Lead under <input id="threshold" type="number" min="0" step="100" value="1000" class="num"> votes</label>
+    </div>
+    <p class="marg-note" id="marg-note"></p>
+    <div class="grid" id="marginals"></div>
+  </section>
+
+  <footer>
+    Preliminary results exclude special votes and can change before the official count is declared.
+    Electorate seats shown are current leads, not confirmed wins. Seat projections are the Electoral Commission's.
+  </footer>
+</main>
+
+<script>
+const PARTIES = [
+  { re: /labour/i,                      short: 'Labour',        color: '#dc3b36', order: 10 },
+  { re: /green/i,                       short: 'Greens',        color: '#4a9d46', order: 20 },
+  { re: /m[aā]ori/i,                    short: 'Te Pāti Māori', color: '#8d1c17', order: 30 },
+  { re: /opportunit|\(TOP\)/i,          short: 'Opportunity',   color: '#3db3bd', order: 40 },
+  { re: /new zealand first|nz first/i,  short: 'NZ First',      color: '#8a8d93', order: 60 },
+  { re: /^act\b|act new zealand/i,      short: 'ACT',           color: '#df3d97', order: 70 },
+  { re: /national/i,                    short: 'National',      color: '#3d8de0', order: 80 },
+];
+function partyInfo(name) {
+  if (!name) return { short: '', color: 'var(--unknown)', order: 50 };
+  if (/^independent$/i.test(name)) return { short: 'Independent', color: 'var(--unknown)', order: 50 };
+  return PARTIES.find(p => p.re.test(name)) || { short: name.replace(/\s+Party$/i, ''), color: 'var(--unknown)', order: 50 };
+}
+
+const fmt = n => n == null ? '–' : n.toLocaleString('en-NZ');
+const time = iso => iso ? new Date(iso).toLocaleTimeString('en-NZ', { hour: 'numeric', minute: '2-digit', second: '2-digit' }) : '–';
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+let showAll = false;
+let threshold = Number(new URLSearchParams(location.search).get('threshold')) || 1000;
+const openSeats = new Set();
+let last = null;
+
+document.getElementById('threshold').value = threshold;
+document.getElementById('threshold').addEventListener('input', e => { threshold = Number(e.target.value) || 0; if (last) renderMarginals(last); });
+document.getElementById('toggle-parties').addEventListener('click', e => {
+  showAll = !showAll;
+  e.currentTarget.setAttribute('aria-expanded', showAll);
+  e.currentTarget.textContent = showAll ? 'Show fewer parties' : 'Show all parties';
+  if (last) renderParties(last);
+});
+
+// ---------- horseshoe ----------
+// Four lanes of seats running up the left leg, over the arch and down the right leg, like RNZ's chart.
+// Seats are ordered along that path; each party takes a run of seats, electorate seats at the end
+// furthest from the majority line.
+function horseshoe(parties) {
+  let T = parties.reduce((s, p) => s + p.seats, 0);
+  const empty = T === 0;
+  if (empty) T = 120;
+
+  const sr = 12, d = 30, lanes = 4, rIn = 96, pad = sr + 4;
+  const radii = Array.from({ length: lanes }, (_, i) => rIn + i * d);
+  const cap = radii.reduce((s, r) => s + Math.PI * r / d, 0);
+  const R = Math.max(0, Math.ceil((T - cap) / (2 * lanes)));
+  const A = T - 2 * lanes * R;
+  const sumR = radii.reduce((a, b) => a + b, 0);
+  const counts = radii.map(r => Math.floor(A * r / sumR));
+  let rem = A - counts.reduce((a, b) => a + b, 0);
+  radii.map((r, i) => ({ i, f: A * r / sumR - counts[i] })).sort((a, b) => b.f - a.f).slice(0, rem).forEach(x => counts[x.i]++);
+
+  const rOut = radii[lanes - 1], cx = pad + rOut, cy = pad + rOut;
+  const W = 2 * cx, H = cy + d * R + pad;
+  const rMid = (radii[0] + rOut) / 2;
+  const F = R ? (R * d) / (2 * R * d + Math.PI * rMid) : 0;
+
+  const seats = [];
+  radii.forEach((r, lane) => {
+    for (let j = 0; j < R; j++) {
+      const y = cy + d * (j + 0.55);
+      seats.push({ x: cx - r, y, p: (R - 1 - j + 0.5) / R * F, lane });
+      seats.push({ x: cx + r, y, p: 1 - F + (j + 0.5) / R * F, lane });
+    }
+    for (let k = 0; k < counts[lane]; k++) {
+      const t = (k + 0.5) / counts[lane], th = Math.PI * (1 - t);
+      seats.push({ x: cx + r * Math.cos(th), y: cy - r * Math.sin(th), p: F + t * (1 - 2 * F), lane });
+    }
+  });
+  seats.sort((a, b) => a.p - b.p || a.lane - b.lane);
+
+  if (!empty) {
+    let idx = 0;
+    parties.filter(p => p.seats > 0)
+      .map(p => ({ ...p, info: partyInfo(p.name) }))
+      .sort((a, b) => a.info.order - b.info.order || b.seats - a.seats)
+      .forEach(p => {
+        const left = idx + p.seats / 2 < T / 2;
+        const elec = Math.min(p.electorate, p.seats), list = p.seats - elec;
+        const kinds = left ? [...Array(elec).fill('e'), ...Array(list).fill('l')] : [...Array(list).fill('l'), ...Array(elec).fill('e')];
+        kinds.forEach(k => { Object.assign(seats[idx], { party: p, kind: k }); idx++; });
+      });
+  }
+
+  const majority = Math.floor(T / 2) + 1;
+  const circles = seats.map(s => {
+    const c = s.party ? s.party.info.color : 'var(--rule)';
+    const title = s.party ? `<title>${esc(s.party.info.short)}: ${s.kind === 'e' ? 'electorate' : 'list'} seat</title>` : '';
+    const hole = s.kind === 'l' ? `<circle cx="${s.x.toFixed(1)}" cy="${s.y.toFixed(1)}" r="${(sr * 0.36).toFixed(1)}" fill="var(--bg)"/>` : '';
+    return `<g>${title}<circle cx="${s.x.toFixed(1)}" cy="${s.y.toFixed(1)}" r="${sr}" fill="${c}"/>${hole}</g>`;
+  }).join('');
+  const lineTop = pad - sr - 2, lineBottom = cy - rIn + sr + 8;
+  return {
+    T, majority, empty,
+    svg: `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${empty ? 'No seats allocated yet' : `${T} seats, ${majority} needed to govern`}">
+      ${circles}
+      <line x1="${cx}" x2="${cx}" y1="${lineTop}" y2="${lineBottom}" stroke="var(--muted)" stroke-width="1.5" stroke-dasharray="4 4"/>
+      <text x="${cx}" y="${lineBottom + 20}" text-anchor="middle" class="seat-label">Majority</text>
+      <text x="${cx}" y="${lineBottom + 40}" text-anchor="middle" class="seat-sub">${majority} to govern</text>
+    </svg>`,
+  };
+}
+
+// ---------- rendering ----------
+
+function render(s) {
+  last = s;
+  const o = s.overall;
+  const stage = o?.stage === 'official' ? 'Official count' : o ? 'Preliminary count' : 'Waiting for results';
+  document.getElementById('stage').textContent = stage;
+
+  const bits = [`Source: <a href="${esc(s.source)}" target="_blank" rel="noopener">${esc(s.source.replace(/^https?:\/\//, ''))}</a>.`];
+  if (o) {
+    bits.push(`Party vote checked ${time(o.fetchedAt)}.`);
+    if (o.countedPct != null) bits.push(`${o.countedPct}% counted.`);
+    if (o.sourceUpdated) bits.push(`Source says updated ${esc(o.sourceUpdated)}.`);
+  }
+  bits.push(`${s.electorates.length} of ${s.electoratesKnown || '?'} electorates loaded.`);
+  document.getElementById('status').innerHTML = bits.join(' ');
+
+  let banner = '';
+  if (s.blocked) banner = `The Electoral Commission site refused the last request (HTTP ${s.blocked.status}) at ${time(s.blocked.at)}. Showing the last good data; the poller keeps retrying.`;
+  else if (!o && s.errors.length) banner = `Can't read the results page yet: ${esc(s.errors[0].message)}`;
+  document.getElementById('banner').innerHTML = banner ? `<p class="banner">${banner}</p>` : '';
+
+  const hs = horseshoe(o?.parties || []);
+  document.getElementById('horseshoe').innerHTML = hs.svg;
+  const overhang = hs.T - 120;
+  document.getElementById('seat-count').innerHTML = hs.empty
+    ? '<span class="muted">No seats allocated yet</span>'
+    : `${hs.T} seats${overhang > 0 ? `<br><span class="muted">${overhang} overhang seat${overhang === 1 ? '' : 's'}</span>` : ''}`;
+
+  renderParties(s);
+  renderMarginals(s);
+}
+
+function renderParties(s) {
+  const parties = (s.overall?.parties || []).slice()
+    .sort((a, b) => b.seats - a.seats || b.votes - a.votes);
+  const shown = showAll ? parties : parties.filter(p => p.seats > 0);
+  const totalVotes = s.overall?.totals?.votes ?? parties.reduce((t, p) => t + p.votes, 0);
+  const totalSeats = parties.reduce((t, p) => t + p.seats, 0);
+  document.getElementById('party-rows').innerHTML = shown.map(p => {
+    const info = partyInfo(p.name);
+    return `<tr><td style="--c:${info.color}" title="${esc(p.name)}">${esc(info.short || p.name)}</td>
+      <td class="num">${fmt(p.votes)}</td><td class="num">${p.pct != null ? p.pct.toFixed(1) + '%' : '–'}</td><td class="num">${p.seats || ''}</td></tr>`;
+  }).join('') + (parties.length ? `<tr class="total"><td>Total</td><td class="num">${fmt(totalVotes)}</td><td></td><td class="num">${totalSeats}</td></tr>` : '');
+  document.getElementById('toggle-parties').hidden = parties.length === shown.length && !showAll;
+}
+
+function candRow(c) {
+  const info = partyInfo(c.party);
+  return `<span class="dot" style="background:${info.color}"></span>
+    <span class="who">${esc(c.name)}${info.short ? `<small>${esc(info.short)}</small>` : ''}</span>
+    <span class="num">${fmt(c.votes)}</span>`;
+}
+
+function renderMarginals(s) {
+  const close = s.electorates
+    .filter(e => e.margin != null && e.leader && e.runnerUp && e.margin < threshold)
+    .sort((a, b) => a.margin - b.margin);
+
+  document.getElementById('marg-note').textContent = s.electorates.length
+    ? `${close.length} of ${s.electorates.length} loaded electorates have a lead under ${fmt(threshold)} votes. Close seats are re-checked about every 30 seconds, the rest every couple of minutes.`
+    : '';
+
+  const box = document.getElementById('marginals');
+  if (!s.electorates.length) {
+    const why = s.discovery?.status === 'not-found'
+      ? `No electorate pages found under ${esc(s.source)} yet. The poller retries every 2 minutes. If this persists, run the server with --dump and check the saved HTML.`
+      : 'Loading electorate results…';
+    box.innerHTML = `<div class="empty">${why}</div>`;
+    return;
+  }
+  if (!close.length) { box.innerHTML = `<div class="empty">No electorate has a lead under ${fmt(threshold)} votes right now.</div>`; return; }
+
+  box.innerHTML = close.map(e => {
+    const L = partyInfo(e.leader.party), Rn = partyInfo(e.runnerUp.party);
+    const share = e.leader.votes / ((e.leader.votes + e.runnerUp.votes) || 1) * 100;
+    const h = e.history || [];
+    // history holds one entry per change seen by this poller session
+    const prev = h.length > 1 ? h[h.length - 2] : null;
+    let lastFlip = null;
+    for (let i = h.length - 1; i > 0; i--) if (h[i].leader !== h[i - 1].leader) { lastFlip = h[i]; break; }
+    const flip = lastFlip ? `<span class="flip">Lead changed at ${time(lastFlip.at)}</span>` : '';
+    let delta = '';
+    if (prev && prev.leader === e.leader.name && prev.margin !== e.margin) {
+      const dm = e.margin - prev.margin;
+      delta = `${dm < 0 ? 'Narrowed' : 'Widened'} by ${fmt(Math.abs(dm))} since ${time(prev.at)}`;
+    }
+    const key = e.name || e.url;
+    const rest = (e.candidates || []).slice(2);
+    return `<article class="seat">
+      <div class="seat-top">
+        <div>
+          <h3>${esc(e.name || 'Unnamed electorate')}</h3>
+          <div class="meta">${e.countedPct != null ? `${e.countedPct}% counted` : 'Count progress unknown'}${e.countedVotes != null ? `, ${fmt(e.countedVotes)} votes` : ''}. Checked ${time(e.fetchedAt)}.</div>
+        </div>
+        <div class="margin"><b class="num">${fmt(e.margin)}</b><span>${esc(L.short || 'Leader')} lead</span></div>
+      </div>
+      <div class="tug" aria-hidden="true"><i style="width:${share.toFixed(2)}%;background:${L.color}"></i><i style="flex:1;background:${Rn.color}"></i></div>
+      <div class="cand">${candRow(e.leader)}${candRow(e.runnerUp)}</div>
+      ${flip || delta ? `<div class="delta">${[flip, delta].filter(Boolean).join(' ')}</div>` : ''}
+      ${rest.length ? `<details data-key="${esc(key)}" ${openSeats.has(key) ? 'open' : ''}><summary>${rest.length} other candidate${rest.length === 1 ? '' : 's'}</summary><div class="cand">${rest.map(candRow).join('')}</div></details>` : ''}
+    </article>`;
+  }).join('');
+  box.querySelectorAll('details').forEach(d => d.addEventListener('toggle', () => {
+    d.open ? openSeats.add(d.dataset.key) : openSeats.delete(d.dataset.key);
+  }));
+}
+
+async function tick() {
+  try {
+    const res = await fetch('/api/state', { cache: 'no-store' });
+    render(await res.json());
+  } catch (e) {
+    document.getElementById('status').textContent = `Lost contact with the server (${e.message}). Retrying every 5 seconds.`;
+  } finally {
+    setTimeout(tick, 5000);
+  }
+}
+tick();
+</script>
+</body>
+</html>

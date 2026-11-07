@@ -1,0 +1,15 @@
+{
+  "name": "nz-election-live",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Live NZ 2026 election results dashboard: RNZ-style seat horseshoe plus marginal electorates, polled from electionresults.govt.nz",
+  "type": "module",
+  "main": "server.mjs",
+  "scripts": {
+    "start": "node server.mjs",
+    "dry-run-2023": "node server.mjs --base https://archive.electionresults.govt.nz/electionresults_2023/"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
